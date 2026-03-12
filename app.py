@@ -61,7 +61,8 @@ html, body, .stApp {
 }
 
 /* ── Hide Streamlit chrome ── */
-#MainMenu, footer, header { visibility: hidden; }
+#MainMenu { display: none; }
+footer { visibility: hidden; }
 .stDeployButton { display: none; }
 
 /* ── Sidebar ── */
@@ -638,3 +639,4 @@ else:
         '</div>',
         unsafe_allow_html=True
     )
+
