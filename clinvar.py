@@ -5,42 +5,46 @@ Queries NCBI E-utilities (free, no API key required) for
 pathogenic and likely pathogenic variants by gene name.
 
 Usage:
-    from clinvar import fetch_clinvar_variants
+    from clinvar import fetch_clinvar_variants, clinvar_url
     variants = fetch_clinvar_variants("HBB")
 """
 
 import time
 import urllib.request
 import urllib.parse
-import urllib.error
 import json
 from typing import Optional
 
 # ─── CONSTANTS ───────────────────────────────────────────────────────────────
 
-ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+ESEARCH_URL  = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 ESUMMARY_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
-EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 
-# Only show these significance labels — everything else is noise
+# Significance strings to keep — checked against germline_classification.description
 KEEP_SIGNIFICANCE = {
     "pathogenic",
     "likely pathogenic",
     "pathogenic/likely pathogenic",
+    "pathogenic, other",
+    "pathogenic; other",
+    "likely pathogenic, other",
 }
 
-MAX_VARIANTS = 15      # cap per gene — enough to be useful, not overwhelming
-REQUEST_DELAY = 0.34   # NCBI asks ≤3 requests/sec without an API key
+MAX_FETCH     = 40     # fetch more, filter locally
+REQUEST_DELAY = 0.4    # NCBI: <=3 req/sec without API key
 
 
 # ─── HELPERS ─────────────────────────────────────────────────────────────────
 
 def _get(url: str, params: dict) -> Optional[dict]:
-    """HTTP GET with NCBI E-utilities, returns parsed JSON or None on error."""
-    query = urllib.parse.urlencode(params)
-    full_url = f"{url}?{query}"
+    params["retmode"] = "json"
+    full_url = url + "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(
+        full_url,
+        headers={"User-Agent": "pyGenoScouter/1.0 (research tool)"}
+    )
     try:
-        with urllib.request.urlopen(full_url, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=12) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception:
         return None
@@ -48,32 +52,26 @@ def _get(url: str, params: dict) -> Optional[dict]:
 
 # ─── PUBLIC API ──────────────────────────────────────────────────────────────
 
-def fetch_clinvar_variants(gene_name: str) -> list[dict]:
+def fetch_clinvar_variants(gene_name: str) -> list:
     """
-    Return a list of pathogenic/likely-pathogenic variants for gene_name.
+    Return pathogenic / likely-pathogenic ClinVar variants for gene_name.
 
-    Each dict has:
-        title       str   — variant name / description
-        significance str  — clinical significance label
-        condition   str   — associated condition(s)
-        variation_id str  — ClinVar variation ID (for URL)
-        review_status str — review status (stars proxy)
+    Each dict:
+        title        str  — variant name e.g. NM_000518.5(HBB):c.20A>T
+        significance str  — e.g. "Pathogenic"
+        condition    str  — associated condition(s)
+        variation_id str  — ClinVar variation ID
+        review_status str — review status string
     """
     gene = gene_name.strip().upper()
 
-    # ── Step 1: search ClinVar for this gene + pathogenic filter ─────────────
-    search_params = {
-        "db": "clinvar",
-        "term": (
-            f"{gene}[gene] AND ("
-            f'"pathogenic"[clinical_significance] OR '
-            f'"likely pathogenic"[clinical_significance])'
-        ),
-        "retmax": MAX_VARIANTS,
-        "retmode": "json",
-    }
+    # ── Step 1: search ───────────────────────────────────────────────────────
     time.sleep(REQUEST_DELAY)
-    search_data = _get(ESEARCH_URL, search_params)
+    search_data = _get(ESEARCH_URL, {
+        "db":     "clinvar",
+        "term":   f"{gene}[gene] AND (pathogenic[clinsig] OR likely pathogenic[clinsig])",
+        "retmax": MAX_FETCH,
+    })
 
     if not search_data:
         return []
@@ -82,55 +80,51 @@ def fetch_clinvar_variants(gene_name: str) -> list[dict]:
     if not ids:
         return []
 
-    # ── Step 2: fetch summaries for those IDs ────────────────────────────────
+    # ── Step 2: fetch summaries ───────────────────────────────────────────────
     time.sleep(REQUEST_DELAY)
-    summary_params = {
+    summary_data = _get(ESUMMARY_URL, {
         "db": "clinvar",
         "id": ",".join(ids),
-        "retmode": "json",
-    }
-    summary_data = _get(ESUMMARY_URL, summary_params)
+    })
 
     if not summary_data:
         return []
 
     result_map = summary_data.get("result", {})
-    uids = result_map.get("uids", [])
+    uids       = result_map.get("uids", [])
 
     variants = []
     for uid in uids:
         rec = result_map.get(uid, {})
 
-        # Clinical significance
-        sig_obj = rec.get("clinical_significance", {})
-        sig = sig_obj.get("description", "").lower().strip()
+        # ── Significance — now under germline_classification ──────────────
+        germline = rec.get("germline_classification", {})
+        sig_raw  = germline.get("description", "").strip()
+        sig      = sig_raw.lower()
 
-        if sig not in KEEP_SIGNIFICANCE:
+        if not any(keep in sig for keep in KEEP_SIGNIFICANCE):
             continue
 
-        # Condition name — flatten list if needed
-        trait_set = rec.get("trait_set", [])
+        # ── Condition — from germline_classification.trait_set ────────────
+        trait_set  = germline.get("trait_set", [])
         conditions = []
         for trait in trait_set:
-            trait_name = trait.get("trait_name", "")
-            if trait_name and trait_name.lower() not in ("not provided", "not specified", ""):
-                conditions.append(trait_name)
+            name = trait.get("trait_name", "").strip()
+            if name and name.lower() not in ("not provided", "not specified", ""):
+                conditions.append(name)
         condition_str = "; ".join(conditions) if conditions else "—"
 
-        # Review status
-        review_status = sig_obj.get("review_status", "")
-
         variants.append({
-            "title": rec.get("title", uid),
-            "significance": sig.title(),
-            "condition": condition_str,
-            "variation_id": uid,
-            "review_status": review_status,
+            "title":         rec.get("title", uid),
+            "significance":  sig_raw.title(),
+            "condition":     condition_str,
+            "variation_id":  uid,
+            "review_status": germline.get("review_status", ""),
         })
 
     return variants
 
 
 def clinvar_url(variation_id: str) -> str:
-    """Direct URL to a ClinVar variation entry."""
     return f"https://www.ncbi.nlm.nih.gov/clinvar/variation/{variation_id}/"
+
