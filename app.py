@@ -3,12 +3,13 @@ app.py — pyGeno Scouter
 =======================
 Clinical phenotype → genomic coordinates interface.
 Curated North Africa-focused database + HPO/Orphanet fallback.
+Gene batch mode with ClinVar pathogenic variant lookup.
 
 Run:
     streamlit run app.py
 
 Requirements (Python 3.11):
-    pip install streamlit pandas
+    pip install streamlit pandas requests
 """
 
 import os
@@ -24,6 +25,7 @@ from data_loader import (
     load_hpo_ontology, load_hpo_gene_map, load_orphanet,
     search_hpo, search_orphanet
 )
+from clinvar import fetch_clinvar_variants, clinvar_url
 
 # ─── CONFIGURATION ──────────────────────────────────────────────────────────
 
@@ -123,6 +125,27 @@ h1 {
     outline: none !important;
 }
 [data-testid="stTextInput"] input::placeholder {
+    color: #445068 !important;
+}
+
+/* ── Text area ── */
+[data-testid="stTextArea"] textarea {
+    background: #131720 !important;
+    border: 1px solid #2a3050 !important;
+    border-radius: 8px !important;
+    color: #c8cfe0 !important;
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 14px !important;
+    padding: 12px 16px !important;
+    transition: border-color 0.2s !important;
+    line-height: 1.8 !important;
+}
+[data-testid="stTextArea"] textarea:focus {
+    border-color: #4a6cf7 !important;
+    box-shadow: 0 0 0 3px rgba(74,108,247,0.12) !important;
+    outline: none !important;
+}
+[data-testid="stTextArea"] textarea::placeholder {
     color: #445068 !important;
 }
 
@@ -307,10 +330,12 @@ h1 {
     font-family: 'IBM Plex Mono', monospace;
     letter-spacing: 0.04em;
 }
-.badge-curated  { background: #0f1f10; color: #4a8e5a; border: 1px solid #1e3a20; }
-.badge-hpo      { background: #101828; color: #4a6ec8; border: 1px solid #1e3060; }
-.badge-orphanet { background: #180f28; color: #8a5ec8; border: 1px solid #301a50; }
-.badge-icd      { background: #180f28; color: #8a5ec8; border: 1px solid #301a50; }
+.badge-curated    { background: #0f1f10; color: #4a8e5a; border: 1px solid #1e3a20; }
+.badge-hpo        { background: #101828; color: #4a6ec8; border: 1px solid #1e3060; }
+.badge-orphanet   { background: #180f28; color: #8a5ec8; border: 1px solid #301a50; }
+.badge-icd        { background: #180f28; color: #8a5ec8; border: 1px solid #301a50; }
+.badge-pathogenic { background: #1a0f0f; color: #c06060; border: 1px solid #3a1818; }
+.badge-likely     { background: #1a150f; color: #c09060; border: 1px solid #3a2818; }
 .tip-box {
     background: #0e1220;
     border: 1px solid #1e2438;
@@ -324,6 +349,28 @@ h1 {
     border: none;
     border-top: 1px solid #1a1e2e;
     margin: 20px 0;
+}
+.clinvar-row {
+    background: #0e1118;
+    border: 1px solid #1e2438;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 6px 0;
+    font-size: 13px;
+    color: #a0b0d0;
+    font-family: 'IBM Plex Sans', sans-serif;
+    line-height: 1.6;
+}
+.clinvar-row .variant-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: #7090e8;
+    margin-bottom: 4px;
+}
+.clinvar-row .variant-condition {
+    color: #606880;
+    font-size: 12px;
+    margin-top: 4px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -357,6 +404,12 @@ def run_pygeno_query(gene_name: str) -> dict:
         return {"error": "Query timed out (>60s). Is the genome imported?"}
     except Exception as e:
         return {"error": str(e)}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_clinvar_variants(gene_name: str) -> list:
+    """Cached ClinVar fetch — avoids re-hitting the API on reruns."""
+    return fetch_clinvar_variants(gene_name)
 
 
 def pygeno_available():
@@ -430,6 +483,44 @@ def show_pygeno_section(genes: list):
                              if iso["protein_length"] > 60 else ""),
                             language=None
                         )
+
+
+def show_clinvar_section(gene_name: str):
+    """Render ClinVar pathogenic variants for a gene."""
+    with st.spinner(f"Fetching ClinVar variants — {gene_name}..."):
+        variants = get_clinvar_variants(gene_name)
+
+    if not variants:
+        st.markdown(
+            '<div class="tip-box">No pathogenic or likely pathogenic variants '
+            'found in ClinVar for this gene.</div>',
+            unsafe_allow_html=True
+        )
+        return
+
+    st.caption(f"{len(variants)} pathogenic / likely pathogenic variant(s) — ClinVar · NCBI")
+
+    for v in variants:
+        sig = v["significance"].lower()
+        if "likely" in sig:
+            badge = '<span class="badge badge-likely">Likely Pathogenic</span>'
+        else:
+            badge = '<span class="badge badge-pathogenic">Pathogenic</span>'
+
+        url = clinvar_url(v["variation_id"])
+        st.markdown(
+            f'<div class="clinvar-row">'
+            f'<div class="variant-title">{v["title"]}</div>'
+            f'{badge}'
+            f'<div class="variant-condition">Condition: {v["condition"]}</div>'
+            f'<div style="margin-top:6px;">'
+            f'<a href="{url}" target="_blank" '
+            f'style="font-size:11px;color:#4a6cf7;text-decoration:none;">'
+            f'View on ClinVar →</a>'
+            f'</div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
 
 # ─── RENDERERS ───────────────────────────────────────────────────────────────
 
@@ -524,6 +615,7 @@ with st.sidebar:
     st.success(f"HPO — {len(term_to_id):,} terms")
     st.success(f"HPO genes — {len(hp_to_genes):,} codes")
     st.success(f"Orphanet — {len(orphanet_diseases):,} diseases")
+    st.success("ClinVar — NCBI (live)")
     if pygeno_available():
         st.success(f"pyGeno ({GENOME_BUILD})")
     else:
@@ -535,6 +627,7 @@ with st.sidebar:
     st.caption("**Curated** — North Africa-focused, French/English")
     st.caption("**HPO** — any genetic condition, English")
     st.caption("**Orphanet** — 4,128 rare diseases, French/English")
+    st.caption("**ClinVar** — pathogenic variants by gene (live)")
 
     st.divider()
     st.markdown("#### Curated conditions")
@@ -544,6 +637,7 @@ with st.sidebar:
     st.divider()
     st.caption("pyGeno · Tariq Daouda, IRIC Montréal")
     st.caption("HPO · JAX &nbsp;|&nbsp; Orphanet · INSERM")
+    st.caption("ClinVar · NCBI")
     st.caption(f"Genome: Ensembl {GENOME_BUILD} · Offline")
 
 # ─── HEADER ──────────────────────────────────────────────────────────────────
@@ -556,87 +650,167 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# ─── SEARCH ──────────────────────────────────────────────────────────────────
+# ─── TOP-LEVEL TABS ──────────────────────────────────────────────────────────
 
-col_q, col_btn = st.columns([5, 1])
-with col_q:
-    query = st.text_input(
-        label="Search",
-        placeholder="hemolytic anemia · muscle weakness · recurrent fever · G6PD · DMD ...",
-        label_visibility="collapsed"
-    )
-with col_btn:
-    st.button("Search", type="primary", use_container_width=True)
+main_tab_phenotype, main_tab_batch = st.tabs([
+    "🔍  Phenotype Search",
+    "🧬  Gene Batch + ClinVar",
+])
 
-# ─── RESULTS ─────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+# TAB 1 — PHENOTYPE SEARCH (existing behaviour, unchanged)
+# ════════════════════════════════════════════════════════════════════════════
 
-if query and query.strip():
-    q = query.strip()
+with main_tab_phenotype:
 
-    # Layer 1 — Curated
-    curated_matches = search_phenotypes(q)
-    if curated_matches:
+    col_q, col_btn = st.columns([5, 1])
+    with col_q:
+        query = st.text_input(
+            label="Search",
+            placeholder="hemolytic anemia · muscle weakness · recurrent fever · G6PD · DMD ...",
+            label_visibility="collapsed"
+        )
+    with col_btn:
+        st.button("Search", type="primary", use_container_width=True, key="btn_phenotype")
+
+    if query and query.strip():
+        q = query.strip()
+
+        # Layer 1 — Curated
+        curated_matches = search_phenotypes(q)
+        if curated_matches:
+            st.markdown(
+                f'<div class="section-label">Curated results — {len(curated_matches)} match(es)</div>',
+                unsafe_allow_html=True
+            )
+            for condition_key, condition in curated_matches:
+                render_curated_result(condition_key, condition)
+
+        # Layer 2 — HPO + Orphanet
+        st.markdown('<hr class="divider">', unsafe_allow_html=True)
+        with st.expander(
+            "Expand search — HPO & Orphanet",
+            expanded=(len(curated_matches) == 0)
+        ):
+            hpo_tab, orphanet_tab = st.tabs(["HPO — Human Phenotype Ontology", "Orphanet"])
+
+            with hpo_tab:
+                hpo_hits = search_hpo(q, term_to_id, hp_to_genes, id_to_name, max_results=5)
+                if hpo_hits:
+                    st.caption(f"{len(hpo_hits)} HPO term(s) — HPO is indexed in English")
+                    for hit in hpo_hits:
+                        render_hpo_result(hit)
+                else:
+                    st.info("No HPO terms found. HPO is in English — try: 'muscle weakness', 'hemolytic anemia', 'recurrent fever'")
+
+            with orphanet_tab:
+                orphanet_hits = search_orphanet(q, orphanet_diseases, max_results=5)
+                if orphanet_hits:
+                    st.caption(f"{len(orphanet_hits)} Orphanet disease(s) found")
+                    for disease in orphanet_hits:
+                        render_orphanet_result(disease)
+                else:
+                    st.info("No Orphanet diseases found for this query.")
+
+    else:
+        st.markdown('<hr class="divider">', unsafe_allow_html=True)
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown('<div class="section-label">Hematology</div>', unsafe_allow_html=True)
+            for t in ["hemolytic anemia", "thalassemia", "sickle cell", "G6PD deficiency"]:
+                st.caption(f"· {t}")
+        with c2:
+            st.markdown('<div class="section-label">Neurology</div>', unsafe_allow_html=True)
+            for t in ["muscle weakness elevated CK", "peripheral neuropathy", "epilepsy"]:
+                st.caption(f"· {t}")
+        with c3:
+            st.markdown('<div class="section-label">Inflammation / Other</div>', unsafe_allow_html=True)
+            for t in ["recurrent fever", "cystic fibrosis", "hypertrophic cardiomyopathy"]:
+                st.caption(f"· {t}")
+
+        st.write("")
         st.markdown(
-            f'<div class="section-label">Curated results — {len(curated_matches)} match(es)</div>',
+            '<div class="tip-box">'
+            'The curated database works in French and English. '
+            'HPO search works best in English. '
+            'Orphanet works in both. '
+            'If a curated result exists it appears first — '
+            'use "Expand search" for HPO and Orphanet coverage.'
+            '</div>',
             unsafe_allow_html=True
         )
-        for condition_key, condition in curated_matches:
-            render_curated_result(condition_key, condition)
 
-    # Layer 2 — HPO + Orphanet
-    st.markdown('<hr class="divider">', unsafe_allow_html=True)
-    with st.expander(
-        "Expand search — HPO & Orphanet",
-        expanded=(len(curated_matches) == 0)
-    ):
-        hpo_tab, orphanet_tab = st.tabs(["HPO — Human Phenotype Ontology", "Orphanet"])
+# ════════════════════════════════════════════════════════════════════════════
+# TAB 2 — GENE BATCH + CLINVAR
+# ════════════════════════════════════════════════════════════════════════════
 
-        with hpo_tab:
-            hpo_hits = search_hpo(q, term_to_id, hp_to_genes, id_to_name, max_results=5)
-            if hpo_hits:
-                st.caption(f"{len(hpo_hits)} HPO term(s) — HPO is indexed in English")
-                for hit in hpo_hits:
-                    render_hpo_result(hit)
-            else:
-                st.info("No HPO terms found. HPO is in English — try: 'muscle weakness', 'hemolytic anemia', 'recurrent fever'")
+with main_tab_batch:
 
-        with orphanet_tab:
-            orphanet_hits = search_orphanet(q, orphanet_diseases, max_results=5)
-            if orphanet_hits:
-                st.caption(f"{len(orphanet_hits)} Orphanet disease(s) found")
-                for disease in orphanet_hits:
-                    render_orphanet_result(disease)
-            else:
-                st.info("No Orphanet diseases found for this query.")
-
-# ─── EMPTY STATE ─────────────────────────────────────────────────────────────
-
-else:
-    st.markdown('<hr class="divider">', unsafe_allow_html=True)
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown('<div class="section-label">Hematology</div>', unsafe_allow_html=True)
-        for t in ["hemolytic anemia", "thalassemia", "sickle cell", "G6PD deficiency"]:
-            st.caption(f"· {t}")
-    with c2:
-        st.markdown('<div class="section-label">Neurology</div>', unsafe_allow_html=True)
-        for t in ["muscle weakness elevated CK", "peripheral neuropathy", "epilepsy"]:
-            st.caption(f"· {t}")
-    with c3:
-        st.markdown('<div class="section-label">Inflammation / Other</div>', unsafe_allow_html=True)
-        for t in ["recurrent fever", "cystic fibrosis", "hypertrophic cardiomyopathy"]:
-            st.caption(f"· {t}")
-
-    st.write("")
     st.markdown(
-        '<div class="tip-box">'
-        'The curated database works in French and English. '
-        'HPO search works best in English. '
-        'Orphanet works in both. '
-        'If a curated result exists it appears first — '
-        'use "Expand search" for HPO and Orphanet coverage.'
-        '</div>',
+        '<p style="color:#506080;font-size:13px;margin-bottom:16px;">'
+        'Paste a list of gene names — one per line or comma-separated. '
+        'Scouter will fetch pyGeno coordinates and ClinVar pathogenic variants for each.</p>',
         unsafe_allow_html=True
     )
 
+    col_area, col_run = st.columns([5, 1])
+    with col_area:
+        batch_input = st.text_area(
+            label="Gene list",
+            placeholder="HBB\nG6PD\nCFTR\nMEFV\nDMD",
+            height=160,
+            label_visibility="collapsed",
+            key="batch_input"
+        )
+    with col_run:
+        run_batch = st.button("Run", type="primary", use_container_width=True, key="btn_batch")
+
+    if run_batch and batch_input and batch_input.strip():
+
+        # Parse — handle newlines and commas, deduplicate
+        raw = batch_input.replace(",", "\n")
+        gene_list = [g.strip().upper() for g in raw.splitlines() if g.strip()]
+        gene_list = list(dict.fromkeys(gene_list))
+
+        if not gene_list:
+            st.info("No valid gene names detected.")
+        else:
+            st.markdown(
+                f'<div class="section-label">{len(gene_list)} gene(s) queued</div>',
+                unsafe_allow_html=True
+            )
+            chips = " ".join(f'<span class="gene-chip">{g}</span>' for g in gene_list)
+            st.markdown(chips, unsafe_allow_html=True)
+            st.markdown('<hr class="divider">', unsafe_allow_html=True)
+
+            for gene in gene_list:
+                with st.expander(f"**{gene}**", expanded=True):
+
+                    # ── pyGeno ────────────────────────────────────────────
+                    st.markdown(
+                        '<div class="section-label">Genomic data — pyGeno</div>',
+                        unsafe_allow_html=True
+                    )
+                    show_pygeno_section([gene])
+
+                    st.markdown('<hr class="divider">', unsafe_allow_html=True)
+
+                    # ── ClinVar ───────────────────────────────────────────
+                    st.markdown(
+                        '<div class="section-label">Pathogenic variants — ClinVar</div>',
+                        unsafe_allow_html=True
+                    )
+                    show_clinvar_section(gene)
+
+    else:
+        st.markdown(
+            '<div class="tip-box">'
+            'Enter gene symbols above — HGNC standard names work best '
+            '(e.g. HBB, G6PD, CFTR, MEFV, DMD, BRCA1).<br><br>'
+            'ClinVar results require an internet connection. '
+            'pyGeno results are fully offline.'
+            '</div>',
+            unsafe_allow_html=True
+        )
+#added batch search, csv export.... technically a scouter_v2!
