@@ -223,9 +223,13 @@ Anémie Hémolytique · Drépanocytose · Bêta-Thalassémie · Déficience en G
 
 ## Demo
 
-<!-- Add screenshot or GIF here showing Phenotype Search and Gene Batch tabs -->
-<!-- Recommended: record a short GIF using ScreenToGif (Windows) or Peek (Linux) -->
-<!-- showing: typing "thalassemia" in Phenotype Search, then pasting HBB/G6PD/MEFV in Gene Batch -->
+**Phenotype Search** — type a symptom or disease name in French or English, get curated North Africa results with candidate genes, clinical notes, known variants, and live pyGeno coordinates:
+
+![Phenotype Search](screenshots/phenotype_search.png)
+
+**Gene Batch + ClinVar** — paste a gene list, get pyGeno coordinates and ClinVar pathogenic variants for each gene, with one-click CSV export:
+
+![Gene Batch](screenshots/gene_batch.png)
 
 ---
 
