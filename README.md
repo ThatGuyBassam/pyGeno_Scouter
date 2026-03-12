@@ -28,6 +28,35 @@ Search works across three layers simultaneously:
 
 ---
 
+---
+
+## The problem it solves
+
+pyGeno is a powerful tool for querying personalized genome data programmatically — but it requires Python literacy to use. A clinician or medical student who wants to know the genomic coordinates of HBB, or which genes are associated with recurrent fever in a North African patient, has to write Python code to get that information out of pyGeno. Most do not.
+
+At the same time, the major disease-to-gene databases — OMIM, HPO, Orphanet — exist separately from each other and from pyGeno. A clinician looking up a patient with hemolytic anemia would need to consult OMIM for gene-disease links, HPO for phenotype mappings, Orphanet for rare disease coverage, and then separately query a genome browser for coordinates. None of these databases talk to each other natively.
+
+pyGeno Scouter connects all three layers in a single interface:
+
+```
+Clinical language  →  Candidate genes  →  Live genomic data
+(HPO / Orphanet)      (OMIM / curated)     (pyGeno / Ensembl)
+```
+
+It also addresses a specific gap in existing tools: the North African patient population is underrepresented in most genomic databases. Allele frequencies, mutation spectra, and disease prevalence figures in tools like gnomAD are heavily skewed toward European populations. The curated database in this project is built around conditions with elevated prevalence in Moroccan and North African patients — thalassemia, G6PD deficiency, FMF, CFTR mutations — with clinical notes and variant data reflecting that specific population.
+
+---
+
+## Who is it for
+
+**Medical students and residents** who want to connect a clinical presentation to its genetic basis without writing code. Type a symptom or syndrome name and get candidate genes, coordinates, and known pathogenic variants immediately.
+
+**Researchers using pyGeno** who want a fast interface for exploratory queries — checking gene positions, isoform structures, or protein sequences — without writing a script for every lookup.
+
+**Clinicians in North African and Mediterranean settings** where conditions like beta-thalassemia, sickle cell disease, G6PD deficiency, and FMF are clinically common but often underserved by tools calibrated to European reference populations.
+
+**Anyone building on pyGeno** who wants to see how to bridge the Python 3.6 / Python 3.8+ compatibility gap using a subprocess architecture.
+
 ## Requirements
 
 - Python 3.11 (for Streamlit)
