@@ -17,7 +17,11 @@ import json
 
 def query_gene(gene_name, genome_build):
     try:
-        from pyGeno.Genome import Genome, Gene, Transcript, Protein, Exon
+        from pyGeno.Genome import Genome
+        from pyGeno.Gene import Gene
+        from pyGeno.Transcript import Transcript
+        from pyGeno.Protein import Protein
+        from pyGeno.Exon import Exon
     except ImportError as e:
         return {"error": f"pyGeno not installed in this environment: {e}"}
 
