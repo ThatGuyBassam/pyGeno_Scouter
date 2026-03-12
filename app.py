@@ -784,6 +784,33 @@ with main_tab_batch:
             st.markdown(chips, unsafe_allow_html=True)
             st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
+            # ── Collect all ClinVar results for CSV export ────────────────
+            all_variants = []
+            for gene in gene_list:
+                variants = get_clinvar_variants(gene)
+                for v in variants:
+                    all_variants.append({
+                        "Gene":          gene,
+                        "Variant":       v["title"],
+                        "Significance":  v["significance"],
+                        "Condition":     v["condition"],
+                        "ClinVar URL":   clinvar_url(v["variation_id"]),
+                    })
+
+            # ── CSV export button ─────────────────────────────────────────
+            if all_variants:
+                df_export = pd.DataFrame(all_variants)
+                csv_bytes = df_export.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="⬇ Export ClinVar variants (.csv)",
+                    data=csv_bytes,
+                    file_name="clinvar_variants.csv",
+                    mime="text/csv",
+                    key="csv_export"
+                )
+
+            st.markdown('<hr class="divider">', unsafe_allow_html=True)
+
             for gene in gene_list:
                 with st.expander(f"**{gene}**", expanded=True):
 
@@ -813,4 +840,5 @@ with main_tab_batch:
             '</div>',
             unsafe_allow_html=True
         )
+
 #added batch search, csv export.... technically a scouter_v2!
